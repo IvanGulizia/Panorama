@@ -1,0 +1,6 @@
+{
+  "name": "Panoramix Studio",
+  "description": "An interactive multi-plane parallax drawing and sketching environment with customizable grid settings, vector outliner, and native blend modes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
