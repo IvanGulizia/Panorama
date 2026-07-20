@@ -5,12 +5,14 @@ export type Stroke = {
   name?: string;
   points: AppPoint[];
   color: string;
+  fillColor?: string;
   thickness: number;
   tool: 'brush' | 'eraser' | 'fill';
   visible?: boolean;
   groupId?: string;
   fillStrokeThickness?: number;
   smoothing?: number;
+  gridSnapRoundness?: number;
 };
 
 export type StrokeGroup = {
@@ -46,6 +48,7 @@ export type Project = {
   gridOpacity: number;
   gridSnapEnabled: boolean;
   gridSnapMode?: 'straight' | 'freehand';
+  gridSnapRoundness?: number;
   dofEnabled?: boolean;
   focalPlaneId?: string | null;
   focalRange?: number;

@@ -223,7 +223,21 @@ const LayersPanel: React.FC = () => {
                               onClick={(e) => e.stopPropagation()}
                               onPointerDown={(e) => e.stopPropagation()}
                             />
-                            <span className="text-[10px] font-mono font-bold text-black">{plane.parallaxX.toFixed(1)}x</span>
+                            <div className="relative flex items-center shrink-0">
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={plane.parallaxX}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value);
+                                  updatePlane(plane.id, { parallaxX: isNaN(val) ? 0 : val });
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                className="w-12 bg-gray-50 hover:bg-gray-100/80 border border-gray-200 focus:bg-white focus:border-black rounded px-1 py-0.5 text-[10px] font-mono font-bold text-black text-center focus:outline-none"
+                              />
+                              <span className="text-[9px] font-semibold text-gray-400 absolute right-1 pointer-events-none">x</span>
+                            </div>
                           </div>
 
                           {/* Blur setting */}
@@ -552,7 +566,8 @@ const SettingsPanel: React.FC = () => {
     setGridColor,
     setGridOpacity,
     setGridSnapEnabled,
-    setGridSnapMode
+    setGridSnapMode,
+    setGridSnapRoundness
   } = useStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -685,6 +700,29 @@ const SettingsPanel: React.FC = () => {
                     Tracé Libre
                   </button>
                 </div>
+              </div>
+            )}
+
+            {project.gridEnabled && project.gridSnapEnabled && project.gridSnapMode === 'freehand' && (
+              <div className="pl-6 pt-2 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1 duration-100">
+                <div className="flex justify-between text-[11px] text-gray-500 font-semibold uppercase tracking-wider">
+                  <span>Courbure / Arrondi</span>
+                  <span className="font-bold text-gray-700">
+                    {project.gridSnapRoundness === 0 ? "Angulaire (0%)" : `${project.gridSnapRoundness}%`}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="5"
+                  value={project.gridSnapRoundness ?? 100}
+                  onChange={(e) => setGridSnapRoundness(parseInt(e.target.value))}
+                  className="w-full accent-black cursor-pointer h-1.5 bg-gray-200 rounded-lg appearance-none"
+                />
+                <span className="text-[10px] text-gray-400 leading-normal">
+                  Module l'arrondi des angles en tracé libre pour former des arcs de cercle.
+                </span>
               </div>
             )}
           </div>

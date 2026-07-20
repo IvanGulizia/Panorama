@@ -240,7 +240,7 @@ export class Engine {
     }
   }
 
-  private drawSmoothPath(points: AppPoint[], context: GraphicsContext, isFill: boolean = false) {
+  private drawSmoothPath(points: AppPoint[], context: GraphicsContext, isFill: boolean = false, gridSnapRoundness?: number) {
     if (points.length === 0) return;
     
     context.beginPath();
@@ -250,32 +250,260 @@ export class Engine {
       context.lineTo(points[0].x + 0.1, points[0].y);
       return;
     }
-    
-    if (points.length === 2 || isFill) {
-      context.moveTo(points[0].x, points[0].y);
-      for (let i = 1; i < points.length; i++) {
-        context.lineTo(points[i].x, points[i].y);
-      }
-      return;
-    }
 
-    context.moveTo(points[0].x, points[0].y);
-    for (let i = 1; i < points.length - 1; i++) {
-      const xc = (points[i].x + points[i + 1].x) / 2;
-      const yc = (points[i].y + points[i + 1].y) / 2;
-      context.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+    if (gridSnapRoundness !== undefined) {
+      if (isFill) {
+        // Filter out duplicate or too close points for a closed polygon
+        let filteredPoints: AppPoint[] = [];
+        for (const p of points) {
+          if (filteredPoints.length === 0) {
+            filteredPoints.push(p);
+          } else {
+            const last = filteredPoints[filteredPoints.length - 1];
+            if (Math.hypot(p.x - last.x, p.y - last.y) > 0.5) {
+              filteredPoints.push(p);
+            }
+          }
+        }
+        // Also check start/end
+        if (filteredPoints.length > 2) {
+          const first = filteredPoints[0];
+          const last = filteredPoints[filteredPoints.length - 1];
+          if (Math.hypot(last.x - first.x, last.y - first.y) < 0.5) {
+            filteredPoints.pop();
+          }
+        }
+
+        const N = filteredPoints.length;
+        if (N < 3) {
+          context.moveTo(points[0].x, points[0].y);
+          for (let i = 1; i < points.length; i++) {
+            context.lineTo(points[i].x, points[i].y);
+          }
+          return;
+        }
+
+        const d = new Array(N).fill(0);
+        for (let i = 0; i < N; i++) {
+          const nextIdx = (i + 1) % N;
+          d[i] = Math.hypot(filteredPoints[nextIdx].x - filteredPoints[i].x, filteredPoints[nextIdx].y - filteredPoints[i].y);
+        }
+
+        const T = new Array(N).fill(0);
+        const R = new Array(N).fill(0);
+
+        for (let i = 0; i < N; i++) {
+          const prevIdx = (i - 1 + N) % N;
+          const nextIdx = (i + 1) % N;
+
+          const ux = filteredPoints[prevIdx].x - filteredPoints[i].x;
+          const uy = filteredPoints[prevIdx].y - filteredPoints[i].y;
+          const vx = filteredPoints[nextIdx].x - filteredPoints[i].x;
+          const vy = filteredPoints[nextIdx].y - filteredPoints[i].y;
+
+          const d_prev = d[prevIdx];
+          const d_next = d[i];
+
+          if (d_prev === 0 || d_next === 0) continue;
+
+          const dot = ux * vx + uy * vy;
+          const cosTheta = Math.max(-1, Math.min(1, dot / (d_prev * d_next)));
+          const theta = Math.acos(cosTheta);
+
+          const halfTheta = theta / 2;
+          const tanHalf = Math.tan(halfTheta);
+
+          if (tanHalf > 0.001) {
+            T[i] = Math.min(d_prev, d_next) * 0.5 * (gridSnapRoundness / 100);
+          }
+        }
+
+        // Adjust T to prevent overlap on any segment in the closed loop
+        for (let i = 0; i < N; i++) {
+          const nextIdx = (i + 1) % N;
+          const sum = T[i] + T[nextIdx];
+          const segmentLength = d[i];
+          if (sum > segmentLength && sum > 0) {
+            const scale = segmentLength / sum;
+            T[i] *= scale;
+            T[nextIdx] *= scale;
+          }
+        }
+
+        // Calculate radii R
+        for (let i = 0; i < N; i++) {
+          const prevIdx = (i - 1 + N) % N;
+          const nextIdx = (i + 1) % N;
+
+          const ux = filteredPoints[prevIdx].x - filteredPoints[i].x;
+          const uy = filteredPoints[prevIdx].y - filteredPoints[i].y;
+          const vx = filteredPoints[nextIdx].x - filteredPoints[i].x;
+          const vy = filteredPoints[nextIdx].y - filteredPoints[i].y;
+
+          const d_prev = d[prevIdx];
+          const d_next = d[i];
+
+          if (d_prev === 0 || d_next === 0) continue;
+
+          const dot = ux * vx + uy * vy;
+          const cosTheta = Math.max(-1, Math.min(1, dot / (d_prev * d_next)));
+          const theta = Math.acos(cosTheta);
+
+          const halfTheta = theta / 2;
+          const tanHalf = Math.tan(halfTheta);
+
+          if (tanHalf > 0.001) {
+            let r = T[i] / tanHalf;
+            // Cap the radius to prevent huge arcs on extremely sharp corners
+            const maxRadius = T[i] * 2.0;
+            if (r > maxRadius) {
+              r = maxRadius;
+            }
+            R[i] = r;
+          } else {
+            R[i] = 0;
+          }
+        }
+
+        // Start drawing from the midpoint of the last segment to the first vertex
+        const startPt = {
+          x: (filteredPoints[N - 1].x + filteredPoints[0].x) / 2,
+          y: (filteredPoints[N - 1].y + filteredPoints[0].y) / 2
+        };
+        context.moveTo(startPt.x, startPt.y);
+
+        for (let i = 0; i < N; i++) {
+          const nextIdx = (i + 1) % N;
+          if (R[i] > 0) {
+            context.arcTo(filteredPoints[i].x, filteredPoints[i].y, filteredPoints[nextIdx].x, filteredPoints[nextIdx].y, R[i]);
+          } else {
+            context.lineTo(filteredPoints[i].x, filteredPoints[i].y);
+          }
+        }
+        context.lineTo(startPt.x, startPt.y);
+
+      } else {
+        // Open Path (Brush) with grid snap rounding
+        if (points.length <= 2) {
+          context.moveTo(points[0].x, points[0].y);
+          if (points.length === 2) {
+            context.lineTo(points[1].x, points[1].y);
+          }
+          return;
+        }
+
+        const N = points.length;
+        const T = new Array(N).fill(0);
+        const R = new Array(N).fill(0);
+        const d = new Array(N - 1).fill(0);
+
+        for (let i = 0; i < N - 1; i++) {
+          d[i] = Math.hypot(points[i+1].x - points[i].x, points[i+1].y - points[i].y);
+        }
+
+        for (let i = 1; i < N - 1; i++) {
+          const ux = points[i-1].x - points[i].x;
+          const uy = points[i-1].y - points[i].y;
+          const vx = points[i+1].x - points[i].x;
+          const vy = points[i+1].y - points[i].y;
+          
+          const d_prev = d[i-1];
+          const d_next = d[i];
+          
+          if (d_prev === 0 || d_next === 0) continue;
+          
+          const dot = ux * vx + uy * vy;
+          const cosTheta = Math.max(-1, Math.min(1, dot / (d_prev * d_next)));
+          const theta = Math.acos(cosTheta);
+          
+          const halfTheta = theta / 2;
+          const tanHalf = Math.tan(halfTheta);
+          
+          if (tanHalf > 0.001) {
+            T[i] = Math.min(d_prev, d_next) * 0.5 * (gridSnapRoundness / 100);
+          }
+        }
+
+        // Adjust T to prevent overlap on any segment
+        for (let i = 1; i < N - 2; i++) {
+          const sum = T[i] + T[i+1];
+          const segmentLength = d[i];
+          if (sum > segmentLength && sum > 0) {
+            const scale = segmentLength / sum;
+            T[i] *= scale;
+            T[i+1] *= scale;
+          }
+        }
+
+        // Calculate radii R
+        for (let i = 1; i < N - 1; i++) {
+          const ux = points[i-1].x - points[i].x;
+          const uy = points[i-1].y - points[i].y;
+          const vx = points[i+1].x - points[i].x;
+          const vy = points[i+1].y - points[i].y;
+          
+          const d_prev = d[i-1];
+          const d_next = d[i];
+          
+          if (d_prev === 0 || d_next === 0) continue;
+          
+          const dot = ux * vx + uy * vy;
+          const cosTheta = Math.max(-1, Math.min(1, dot / (d_prev * d_next)));
+          const theta = Math.acos(cosTheta);
+          
+          const halfTheta = theta / 2;
+          const tanHalf = Math.tan(halfTheta);
+          
+          if (tanHalf > 0.001) {
+            let r = T[i] / tanHalf;
+            // Cap the radius to prevent huge arcs on extremely sharp corners
+            const maxRadius = T[i] * 2.0;
+            if (r > maxRadius) {
+              r = maxRadius;
+            }
+            R[i] = r;
+          } else {
+            R[i] = 0;
+          }
+        }
+
+        context.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < N - 1; i++) {
+          if (R[i] > 0) {
+            context.arcTo(points[i].x, points[i].y, points[i+1].x, points[i+1].y, R[i]);
+          } else {
+            context.lineTo(points[i].x, points[i].y);
+          }
+        }
+        context.lineTo(points[N - 1].x, points[N - 1].y);
+      }
+    } else {
+      // Normal stroke (no snap/roundness specified)
+      if (isFill) {
+        context.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+          context.lineTo(points[i].x, points[i].y);
+        }
+      } else {
+        context.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length - 1; i++) {
+          const xc = (points[i].x + points[i + 1].x) / 2;
+          const yc = (points[i].y + points[i + 1].y) / 2;
+          context.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+        }
+        context.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+      }
     }
-    context.lineTo(points[points.length - 1].x, points[points.length - 1].y);
   }
 
   private drawStrokeToContext(stroke: Stroke, context: GraphicsContext) {
     if (stroke.points.length === 0) return;
     
-    this.drawSmoothPath(stroke.points, context, stroke.tool === 'fill');
+    this.drawSmoothPath(stroke.points, context, stroke.tool === 'fill', stroke.gridSnapRoundness);
     
     if (stroke.tool === 'fill') {
       context.closePath();
-      context.fill({ color: stroke.color });
+      context.fill({ color: stroke.fillColor ?? stroke.color });
       const thickness = stroke.fillStrokeThickness ?? stroke.thickness;
       if (thickness > 0) {
         context.stroke({ color: stroke.color, width: thickness, cap: 'round', join: 'round' });
@@ -380,14 +608,17 @@ export class Engine {
         this.lastPos = localPos;
       } else {
         // Start drawing
+        const snapEnabled = state.project.gridSnapEnabled && state.project.gridEnabled;
         this.currentStroke = {
           id: uuidv4(),
           points: [{ x: localPos.x, y: localPos.y }],
           color: state.color,
+          fillColor: state.tool === 'fill' ? state.fillColor : undefined,
           thickness: state.brushSize,
           tool: state.tool,
           smoothing: state.strokeSmoothing,
-          fillStrokeThickness: state.fillStrokeThickness
+          fillStrokeThickness: state.fillStrokeThickness,
+          gridSnapRoundness: snapEnabled ? (state.project.gridSnapRoundness ?? 100) : undefined
         };
         this.lastPos = localPos;
         this.redrawPlane(plane, planeData.context);

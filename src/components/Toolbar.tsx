@@ -14,12 +14,14 @@ export const Toolbar: React.FC = () => {
     mode, 
     tool, 
     color, 
+    fillColor,
     brushSize, 
     eraserMode,
     strokeSmoothing,
     fillStrokeThickness,
     setTool, 
     setColor, 
+    setFillColor,
     setBrushSize,
     setEraserMode,
     setStrokeSmoothing,
@@ -30,6 +32,7 @@ export const Toolbar: React.FC = () => {
   const [sizeOpen, setSizeOpen] = useState(false);
   const [eraserOpen, setEraserOpen] = useState(false);
   const [fillOpen, setFillOpen] = useState(false);
+  const [colorTarget, setColorTarget] = useState<'fill' | 'stroke'>('fill');
 
   const colorRef = useRef<HTMLDivElement>(null);
   const sizeRef = useRef<HTMLDivElement>(null);
@@ -106,20 +109,124 @@ export const Toolbar: React.FC = () => {
             )}
           </button>
           {fillOpen && tool === 'fill' && (
-            <div className="absolute left-14 top-0 w-64 bg-white border border-[#ececec] rounded-xl shadow-lg p-4 z-30 flex flex-col gap-3 animate-in fade-in slide-in-from-left-2 duration-150">
-              <span className="text-xs font-semibold text-gray-500">Contour de remplissage</span>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-700">Épaisseur</span>
-                <span className="font-mono text-xs font-bold">{fillStrokeThickness > 0 ? `${fillStrokeThickness}px` : 'Désactivé'}</span>
+            <div className="absolute left-14 top-0 w-72 bg-white border border-[#ececec] rounded-xl shadow-lg p-4 z-30 flex flex-col gap-4 animate-in fade-in slide-in-from-left-2 duration-150">
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Options de Remplissage</span>
+              
+              {/* Stroke Thickness Section */}
+              <div className="flex flex-col gap-1.5 bg-gray-50 p-2.5 rounded-lg border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-700">Contour (Épaisseur)</span>
+                  <span className="font-mono text-xs font-bold">{fillStrokeThickness > 0 ? `${fillStrokeThickness}px` : 'Désactivé'}</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="40" 
+                  value={fillStrokeThickness} 
+                  onChange={(e) => setFillStrokeThickness(Number(e.target.value))}
+                  className="w-full accent-black cursor-pointer h-1.5 bg-gray-200 rounded-lg appearance-none"
+                />
               </div>
-              <input 
-                type="range" 
-                min="0" 
-                max="40" 
-                value={fillStrokeThickness} 
-                onChange={(e) => setFillStrokeThickness(Number(e.target.value))}
-                className="w-full accent-black cursor-pointer h-1.5 bg-gray-200 rounded-lg appearance-none"
-              />
+
+              {/* Two Color Pickers side-by-side */}
+              <div className="grid grid-cols-2 gap-3.5 border-t border-gray-100 pt-3">
+                {/* Fill Color Column */}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Remplissage</span>
+                  <div className="flex items-center gap-1.5">
+                    <input 
+                      type="color" 
+                      value={fillColor} 
+                      onChange={(e) => setFillColor(e.target.value)}
+                      className="w-7 h-7 rounded-full cursor-pointer border-0 p-0 overflow-hidden bg-transparent shadow-sm shrink-0"
+                    />
+                    <input
+                      type="text"
+                      value={fillColor.toUpperCase()}
+                      onChange={(e) => {
+                        if (e.target.value.startsWith('#') && e.target.value.length <= 7) {
+                          setFillColor(e.target.value);
+                        }
+                      }}
+                      className="text-[10px] font-mono font-semibold text-gray-600 bg-gray-50 border border-gray-100 rounded px-1 py-0.5 uppercase w-full focus:outline-none focus:border-black text-center"
+                    />
+                  </div>
+                </div>
+
+                {/* Stroke Color Column */}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Contour</span>
+                  <div className="flex items-center gap-1.5">
+                    <input 
+                      type="color" 
+                      value={color} 
+                      onChange={(e) => setColor(e.target.value)}
+                      className="w-7 h-7 rounded-full cursor-pointer border-0 p-0 overflow-hidden bg-transparent shadow-sm shrink-0"
+                    />
+                    <input
+                      type="text"
+                      value={color.toUpperCase()}
+                      onChange={(e) => {
+                        if (e.target.value.startsWith('#') && e.target.value.length <= 7) {
+                          setColor(e.target.value);
+                        }
+                      }}
+                      className="text-[10px] font-mono font-semibold text-gray-600 bg-gray-50 border border-gray-100 rounded px-1 py-0.5 uppercase w-full focus:outline-none focus:border-black text-center"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Presets Grid for quick color selection */}
+              <div className="flex flex-col gap-2 border-t border-gray-100 pt-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Palettes prédéfinies</span>
+                  <div className="flex bg-gray-100 rounded-lg p-0.5 shrink-0">
+                    <button
+                      onClick={() => setColorTarget('fill')}
+                      className={`px-1.5 py-0.5 text-[9px] font-bold rounded-md transition-all ${
+                        colorTarget === 'fill' 
+                          ? 'bg-white text-black shadow-sm' 
+                          : 'text-gray-500 hover:text-black'
+                      }`}
+                    >
+                      Remplir
+                    </button>
+                    <button
+                      onClick={() => setColorTarget('stroke')}
+                      className={`px-1.5 py-0.5 text-[9px] font-bold rounded-md transition-all ${
+                        colorTarget === 'stroke' 
+                          ? 'bg-white text-black shadow-sm' 
+                          : 'text-gray-500 hover:text-black'
+                      }`}
+                    >
+                      Contour
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-5 gap-1.5">
+                  {PRESET_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => {
+                        if (colorTarget === 'fill') {
+                          setFillColor(c);
+                        } else {
+                          setColor(c);
+                        }
+                      }}
+                      className={`w-full h-5 rounded cursor-pointer transition-all hover:scale-110 active:scale-95 ${
+                        (colorTarget === 'fill' ? fillColor : color) === c 
+                          ? 'ring-2 ring-black ring-offset-0.5 border border-white scale-110' 
+                          : 'border border-gray-200'
+                      }`}
+                      style={{ backgroundColor: c }}
+                      title={c}
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </div>

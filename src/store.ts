@@ -14,6 +14,7 @@ interface AppState {
   selectedPlaneId: string | null;
   tool: ToolType;
   color: string;
+  fillColor: string;
   brushSize: number;
   eraserMode: EraserMode;
   autoPanEnabled: boolean;
@@ -25,6 +26,7 @@ interface AppState {
   setMode: (mode: AppMode) => void;
   setTool: (tool: ToolType) => void;
   setColor: (color: string) => void;
+  setFillColor: (color: string) => void;
   setBrushSize: (size: number) => void;
   setEraserMode: (mode: EraserMode) => void;
   setAutoPanEnabled: (enabled: boolean) => void;
@@ -41,6 +43,7 @@ interface AppState {
   setGridOpacity: (opacity: number) => void;
   setGridSnapEnabled: (enabled: boolean) => void;
   setGridSnapMode: (mode: 'straight' | 'freehand') => void;
+  setGridSnapRoundness: (roundness: number) => void;
 
   setDofEnabled: (enabled: boolean) => void;
   setFocalPlaneId: (id: string | null) => void;
@@ -104,6 +107,7 @@ const initialProject: Project = {
   gridOpacity: 0.5,
   gridSnapEnabled: false,
   gridSnapMode: 'straight',
+  gridSnapRoundness: 100,
   dofEnabled: false,
   focalPlaneId: null,
   focalRange: 1.0,
@@ -124,6 +128,7 @@ export const useStore = create<AppState>((set) => ({
   selectedPlaneId: initialProject.planes[1].id,
   tool: 'brush',
   color: '#1C1C1C',
+  fillColor: '#FAF9F6',
   brushSize: 10,
   eraserMode: 'stroke',
   autoPanEnabled: false,
@@ -135,6 +140,7 @@ export const useStore = create<AppState>((set) => ({
   setMode: (mode) => set({ mode }),
   setTool: (tool) => set({ tool }),
   setColor: (color) => set({ color }),
+  setFillColor: (fillColor) => set({ fillColor }),
   setBrushSize: (brushSize) => set({ brushSize }),
   setEraserMode: (eraserMode) => set({ eraserMode }),
   setAutoPanEnabled: (autoPanEnabled) => set({ autoPanEnabled }),
@@ -174,6 +180,9 @@ export const useStore = create<AppState>((set) => ({
   })),
   setGridSnapMode: (gridSnapMode) => set((state) => ({
     project: { ...state.project, gridSnapMode }
+  })),
+  setGridSnapRoundness: (gridSnapRoundness) => set((state) => ({
+    project: { ...state.project, gridSnapRoundness }
   })),
 
   setDofEnabled: (dofEnabled) => set((state) => ({
@@ -490,6 +499,7 @@ export const useStore = create<AppState>((set) => ({
         gridOpacity: project.gridOpacity ?? 0.5,
         gridSnapEnabled: project.gridSnapEnabled ?? false,
         gridSnapMode: project.gridSnapMode ?? 'straight',
+        gridSnapRoundness: project.gridSnapRoundness ?? 100,
         dofEnabled: project.dofEnabled ?? false,
         focalPlaneId: project.focalPlaneId ?? null,
         focalRange: project.focalRange ?? 1.0,
