@@ -3,13 +3,20 @@ import { useStore } from '../store';
 import { 
   Eye, EyeOff, Plus, Trash2, Layers, Settings as SettingsIcon, 
   GripVertical, Folder, FolderPlus, ZoomIn, Grid3X3, Download, Upload,
-  Check, ChevronDown, ChevronRight, Edit3
+  Check, ChevronDown, ChevronRight, Edit3, Sliders, Copy
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 
 export const RightSidebar: React.FC = () => {
-  const { mode } = useStore();
-  const [activeTab, setActiveTab] = useState<'layers' | 'settings'>('layers');
+  const { mode, selectedStrokeId } = useStore();
+  const [activeTab, setActiveTab] = useState<'layers' | 'inspector' | 'settings'>('layers');
+
+  // Automatically switch to inspector tab when a stroke is selected!
+  React.useEffect(() => {
+    if (selectedStrokeId) {
+      setActiveTab('inspector');
+    }
+  }, [selectedStrokeId]);
 
   if (mode === 'play') return null;
 
@@ -19,31 +26,45 @@ export const RightSidebar: React.FC = () => {
         <button
           id="tab-layers"
           onClick={() => setActiveTab('layers')}
-          className={`flex-1 py-3.5 text-xs font-bold uppercase tracking-widest transition-colors flex items-center justify-center gap-2 ${
+          className={`flex-1 py-3 px-1 text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1 ${
             activeTab === 'layers' 
               ? 'text-black border-b-2 border-black font-extrabold bg-[#fafafa]' 
               : 'text-[#a1a1a1] hover:text-black hover:bg-[#fafafa]'
           }`}
         >
-          <Layers size={13} />
+          <Layers size={12} />
           Calques
+        </button>
+        <button
+          id="tab-inspector"
+          onClick={() => setActiveTab('inspector')}
+          className={`flex-1 py-3 px-1 text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1 ${
+            activeTab === 'inspector' 
+              ? 'text-black border-b-2 border-black font-extrabold bg-[#fafafa]' 
+              : 'text-[#a1a1a1] hover:text-black hover:bg-[#fafafa]'
+          }`}
+        >
+          <Sliders size={12} />
+          Inspecteur
         </button>
         <button
           id="tab-settings"
           onClick={() => setActiveTab('settings')}
-          className={`flex-1 py-3.5 text-xs font-bold uppercase tracking-widest transition-colors flex items-center justify-center gap-2 ${
+          className={`flex-1 py-3 px-1 text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1 ${
             activeTab === 'settings' 
               ? 'text-black border-b-2 border-black font-extrabold bg-[#fafafa]' 
               : 'text-[#a1a1a1] hover:text-black hover:bg-[#fafafa]'
           }`}
         >
-          <SettingsIcon size={13} />
+          <SettingsIcon size={12} />
           Réglages
         </button>
       </div>
       
       <div className="flex-1 overflow-hidden flex flex-col">
-        {activeTab === 'layers' ? <LayersPanel /> : <SettingsPanel />}
+        {activeTab === 'layers' && <LayersPanel />}
+        {activeTab === 'inspector' && <StrokeInspector />}
+        {activeTab === 'settings' && <SettingsPanel />}
       </div>
     </aside>
   );
@@ -53,6 +74,8 @@ const LayersPanel: React.FC = () => {
   const { 
     project, 
     selectedPlaneId, 
+    selectedStrokeId,
+    setSelectedStrokeId,
     addPlane, 
     deletePlane, 
     updatePlane, 
@@ -391,8 +414,21 @@ const LayersPanel: React.FC = () => {
                             <div className="text-[10px] text-[#a1a1a1] italic py-1 pl-4">Groupe vide</div>
                           ) : (
                             groupStrokes.map((stroke) => (
-                              <div key={stroke.id} className="flex items-center justify-between py-0.5 px-1 rounded hover:bg-gray-50 text-xs">
-                                <div className="flex items-center gap-1 min-w-0">
+                              <div
+                                key={stroke.id}
+                                onClick={() => setSelectedStrokeId(stroke.id)}
+                                className={`flex items-center justify-between py-1 px-1.5 rounded cursor-pointer transition-all text-xs ${
+                                  selectedStrokeId === stroke.id
+                                    ? 'bg-blue-50 hover:bg-blue-100/70 border border-blue-200/50'
+                                    : 'hover:bg-gray-50 border border-transparent'
+                                }`}
+                              >
+                                <div className="flex items-center gap-1 min-w-0" onClick={(e) => {
+                                  // Don't deselect when clicking on rename/etc.
+                                  if (editingItemId === stroke.id) {
+                                    e.stopPropagation();
+                                  }
+                                }}>
                                   <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: stroke.color }} />
                                   {editingItemId === stroke.id ? (
                                     <input
@@ -410,14 +446,17 @@ const LayersPanel: React.FC = () => {
                                   ) : (
                                     <span 
                                       className="text-gray-600 truncate max-w-[85px] cursor-pointer"
-                                      onDoubleClick={() => startEditingItem(stroke.id, stroke.name || "Tracé")}
+                                      onDoubleClick={(e) => {
+                                        e.stopPropagation();
+                                        startEditingItem(stroke.id, stroke.name || "Tracé");
+                                      }}
                                       title="Double-cliquez pour renommer"
                                     >
                                       {stroke.name || "Tracé"}
                                     </span>
                                   )}
                                 </div>
-                                <div className="flex items-center gap-0.5">
+                                <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                                   {/* Quick Move out of Group */}
                                   <select
                                     value={group.id}
@@ -468,8 +507,20 @@ const LayersPanel: React.FC = () => {
                     <span className="text-[10px] text-gray-400 italic block px-1.5 py-1">Aucun tracé hors groupe</span>
                   ) : (
                     strokes.filter(s => !s.groupId).map((stroke) => (
-                      <div key={stroke.id} className="flex items-center justify-between py-1 px-1.5 rounded-lg border border-gray-100 hover:bg-gray-50 text-xs bg-white">
-                        <div className="flex items-center gap-1 min-w-0">
+                      <div
+                        key={stroke.id}
+                        onClick={() => setSelectedStrokeId(stroke.id)}
+                        className={`flex items-center justify-between py-1.5 px-2 rounded-lg border cursor-pointer transition-all text-xs bg-white ${
+                          selectedStrokeId === stroke.id
+                            ? 'border-blue-500 bg-blue-50/30 ring-1 ring-blue-500/20'
+                            : 'border-gray-100 hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1 min-w-0" onClick={(e) => {
+                          if (editingItemId === stroke.id) {
+                            e.stopPropagation();
+                          }
+                        }}>
                           <div className="w-2.5 h-2.5 rounded-full border border-gray-200 shrink-0" style={{ backgroundColor: stroke.color }} />
                           {editingItemId === stroke.id ? (
                             <input
@@ -487,14 +538,17 @@ const LayersPanel: React.FC = () => {
                           ) : (
                             <span 
                               className="text-gray-700 truncate font-medium max-w-[100px] cursor-pointer"
-                              onDoubleClick={() => startEditingItem(stroke.id, stroke.name || "Tracé")}
+                              onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                startEditingItem(stroke.id, stroke.name || "Tracé");
+                              }}
                               title="Double-cliquez pour renommer"
                             >
                               {stroke.name || "Tracé"}
                             </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                           {/* Dropdown to instantly group */}
                           {groups.length > 0 && (
                             <select
@@ -542,6 +596,272 @@ const LayersPanel: React.FC = () => {
             Sélectionnez un calque pour voir ses tracés.
           </div>
         ))}
+      </div>
+    </div>
+  );
+};
+
+const StrokeInspector: React.FC = () => {
+  const { 
+    project, 
+    selectedPlaneId, 
+    selectedStrokeId, 
+    updateStroke, 
+    renameStroke,
+    duplicateStroke,
+    deleteStroke
+  } = useStore();
+
+  if (!selectedStrokeId || !selectedPlaneId) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center bg-gray-50/50 h-full">
+        <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 mb-3 border border-[#ececec]">
+          <Sliders size={20} />
+        </div>
+        <h3 className="text-xs font-semibold text-gray-700">Aucun tracé sélectionné</h3>
+        <p className="text-[11px] text-gray-500 mt-1 max-w-[200px] leading-relaxed">
+          Sélectionnez un tracé avec l'outil de sélection (touche <kbd className="font-mono font-bold bg-white border border-gray-200 px-1 rounded text-[9px] shadow-sm">V</kbd>) ou double-cliquez sur un tracé dans la liste des calques.
+        </p>
+      </div>
+    );
+  }
+
+  const plane = project.planes.find(p => p.id === selectedPlaneId);
+  if (!plane) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center bg-gray-50/50 h-full">
+        <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 mb-3 border border-[#ececec]">
+          <Sliders size={20} />
+        </div>
+        <h3 className="text-xs font-semibold text-gray-700">Calque introuvable</h3>
+      </div>
+    );
+  }
+
+  const stroke = plane.strokes.find(s => s.id === selectedStrokeId);
+  if (!stroke) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center bg-gray-50/50 h-full">
+        <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 mb-3 border border-[#ececec]">
+          <Sliders size={20} />
+        </div>
+        <h3 className="text-xs font-semibold text-gray-700">Tracé introuvable</h3>
+      </div>
+    );
+  }
+
+  const quickStrokeColors = [
+    '#1C1C1C', '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'
+  ];
+
+  const quickFillColors = [
+    '#FAF9F6', '#BFDBFE', '#FCA5A5', '#A7F3D0', '#FDE68A', '#DDD6FE', '#FBCFE8', '#CFFAFE'
+  ];
+
+  return (
+    <div id="stroke-inspector" className="flex flex-col h-full overflow-hidden bg-gray-50">
+      {/* Title */}
+      <div className="px-4 py-2.5 border-b border-[#ececec] flex items-center justify-between bg-white shrink-0">
+        <h2 className="text-[11px] font-bold uppercase tracking-wider text-black flex items-center gap-1.5">
+          <Sliders size={13} className="text-blue-500" />
+          Inspecteur de Tracé
+        </h2>
+        <span className="text-[9px] font-mono font-bold bg-blue-50 text-blue-600 border border-blue-100 rounded px-1.5 py-0.5 uppercase tracking-wide">
+          {stroke.tool === 'fill' ? 'Remplissage' : 'Pinceau'}
+        </span>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Name Input */}
+        <div className="space-y-1.5">
+          <label className="text-[10px] text-[#808080] font-bold uppercase block">Nom du tracé</label>
+          <div className="relative">
+            <input
+              type="text"
+              value={stroke.name || 'Tracé'}
+              onChange={(e) => renameStroke(selectedPlaneId, stroke.id, e.target.value)}
+              className="w-full bg-white border border-[#d1d1d1] hover:border-gray-400 focus:border-black rounded px-2.5 py-1.5 text-xs font-semibold focus:outline-none"
+            />
+          </div>
+        </div>
+
+        {/* Thickness Slider */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] text-[#808080] font-bold uppercase block">
+              {stroke.tool === 'fill' ? 'Contour Remplissage' : 'Épaisseur du trait'}
+            </label>
+            <span className="text-xs font-mono font-bold text-gray-700">{stroke.thickness}px</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min="1"
+              max="100"
+              step="1"
+              value={stroke.thickness}
+              onChange={(e) => updateStroke(selectedPlaneId, stroke.id, { thickness: Number(e.target.value) })}
+              className="flex-1 accent-black h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+            />
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={stroke.thickness}
+              onChange={(e) => {
+                const val = Math.max(1, Math.min(100, parseInt(e.target.value) || 1));
+                updateStroke(selectedPlaneId, stroke.id, { thickness: val });
+              }}
+              className="w-12 bg-white border border-gray-200 focus:border-black rounded px-1.5 py-0.5 text-xs font-mono font-bold text-center focus:outline-none"
+            />
+          </div>
+        </div>
+
+        {/* Roundness Slider */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] text-[#808080] font-bold uppercase block">Arrondi (Roundness)</label>
+            <span className="text-xs font-mono font-bold text-gray-700">{stroke.gridSnapRoundness ?? 0}%</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={stroke.gridSnapRoundness ?? 0}
+              onChange={(e) => {
+                const val = parseInt(e.target.value);
+                updateStroke(selectedPlaneId, stroke.id, { gridSnapRoundness: val === 0 ? undefined : val });
+              }}
+              className="flex-1 accent-black h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+            />
+            <input
+              type="number"
+              min="0"
+              max="100"
+              value={stroke.gridSnapRoundness ?? 0}
+              onChange={(e) => {
+                const val = Math.max(0, Math.min(100, parseInt(e.target.value) || 0));
+                updateStroke(selectedPlaneId, stroke.id, { gridSnapRoundness: val === 0 ? undefined : val });
+              }}
+              className="w-12 bg-white border border-gray-200 focus:border-black rounded px-1.5 py-0.5 text-xs font-mono font-bold text-center focus:outline-none"
+            />
+          </div>
+        </div>
+
+        {/* Stroke Color */}
+        <div className="space-y-2">
+          <label className="text-[10px] text-[#808080] font-bold uppercase block">Couleur du contour</label>
+          <div className="flex items-center gap-3">
+            <div className="relative w-8 h-8 rounded-lg border border-gray-200 overflow-hidden shrink-0 shadow-sm cursor-pointer hover:scale-105 transition-transform">
+              <input
+                type="color"
+                value={stroke.color}
+                onChange={(e) => updateStroke(selectedPlaneId, stroke.id, { color: e.target.value })}
+                className="absolute inset-0 w-full h-full p-0 border-0 scale-150 cursor-pointer"
+              />
+            </div>
+            <div className="flex-1 flex flex-wrap gap-1.5">
+              {quickStrokeColors.map(c => (
+                <button
+                  key={c}
+                  onClick={() => updateStroke(selectedPlaneId, stroke.id, { color: c })}
+                  className={`w-5 h-5 rounded-full border border-black/5 hover:scale-110 transition-transform ${
+                    stroke.color === c ? 'ring-2 ring-blue-500 ring-offset-1' : ''
+                  }`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Fill Properties (if Fill tool) */}
+        {stroke.tool === 'fill' && (
+          <>
+            {/* Fill Color */}
+            <div className="space-y-2 pt-2 border-t border-gray-200/50">
+              <label className="text-[10px] text-[#808080] font-bold uppercase block">Couleur de remplissage</label>
+              <div className="flex items-center gap-3">
+                <div className="relative w-8 h-8 rounded-lg border border-gray-200 overflow-hidden shrink-0 shadow-sm cursor-pointer hover:scale-105 transition-transform">
+                  <input
+                    type="color"
+                    value={stroke.fillColor ?? '#ffffff'}
+                    onChange={(e) => updateStroke(selectedPlaneId, stroke.id, { fillColor: e.target.value })}
+                    className="absolute inset-0 w-full h-full p-0 border-0 scale-150 cursor-pointer"
+                  />
+                </div>
+                <div className="flex-1 flex flex-wrap gap-1.5">
+                  {quickFillColors.map(c => (
+                    <button
+                      key={c}
+                      onClick={() => updateStroke(selectedPlaneId, stroke.id, { fillColor: c })}
+                      className={`w-5 h-5 rounded-full border border-black/5 hover:scale-110 transition-transform ${
+                        stroke.fillColor === c ? 'ring-2 ring-blue-500 ring-offset-1' : ''
+                      }`}
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Fill Stroke Thickness */}
+            <div className="space-y-1.5 pt-1">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] text-[#808080] font-bold uppercase block">Épaisseur du contour</label>
+                <span className="text-xs font-mono font-bold text-gray-700">
+                  {stroke.fillStrokeThickness ?? stroke.thickness ?? 2}px
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min="0"
+                  max="50"
+                  step="1"
+                  value={stroke.fillStrokeThickness ?? stroke.thickness ?? 2}
+                  onChange={(e) => updateStroke(selectedPlaneId, stroke.id, { fillStrokeThickness: Number(e.target.value) })}
+                  className="flex-1 accent-black h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                />
+                <input
+                  type="number"
+                  min="0"
+                  max="50"
+                  value={stroke.fillStrokeThickness ?? stroke.thickness ?? 2}
+                  onChange={(e) => {
+                    const val = Math.max(0, Math.min(50, parseInt(e.target.value) || 0));
+                    updateStroke(selectedPlaneId, stroke.id, { fillStrokeThickness: val });
+                  }}
+                  className="w-12 bg-white border border-gray-200 focus:border-black rounded px-1.5 py-0.5 text-xs font-mono font-bold text-center focus:outline-none"
+                />
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Action buttons */}
+        <div className="flex gap-2.5 pt-4 border-t border-gray-200">
+          <button
+            onClick={() => duplicateStroke(selectedPlaneId, stroke.id)}
+            className="flex-1 py-2 px-3 bg-white hover:bg-gray-100 border border-gray-200 rounded-lg text-xs font-semibold text-black transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+          >
+            <Copy size={13} />
+            Dupliquer
+          </button>
+          <button
+            onClick={() => {
+              if (confirm("Supprimer ce tracé définitivement ?")) {
+                deleteStroke(selectedPlaneId, stroke.id);
+              }
+            }}
+            className="flex-1 py-2 px-3 bg-red-50 hover:bg-red-100 border border-red-100 rounded-lg text-xs font-semibold text-red-600 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+          >
+            <Trash2 size={13} />
+            Supprimer
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store';
-import { Pencil, Eraser, PaintBucket, Palette, Sliders, ToggleLeft, ToggleRight, Check } from 'lucide-react';
+import { Pencil, Eraser, PaintBucket, Palette, Sliders, ToggleLeft, ToggleRight, Check, MousePointer } from 'lucide-react';
 
 const PRESET_COLORS = [
   '#1C1C1C', '#A38771', '#839788', '#7A8B99', 
@@ -64,6 +64,24 @@ export const Toolbar: React.FC = () => {
   return (
     <aside id="toolbar-container" className="w-16 h-full border-r border-[#ececec] flex flex-col items-center py-6 gap-6 bg-white z-20 shrink-0">
       <div className="flex flex-col gap-4">
+        {/* Selection Tool */}
+        <button
+          id="tool-select-btn"
+          onClick={() => {
+            setTool('select');
+            setSizeOpen(false);
+            setColorOpen(false);
+          }}
+          className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${
+            tool === 'select' 
+              ? 'bg-black text-white shadow-sm' 
+              : 'text-[#a1a1a1] hover:bg-[#f5f5f5] hover:text-black'
+          }`}
+          title="Sélectionner / Inspecter"
+        >
+          <MousePointer size={18} />
+        </button>
+
         {/* Brush Tool */}
         <button
           id="tool-brush-btn"

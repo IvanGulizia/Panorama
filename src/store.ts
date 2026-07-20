@@ -3,7 +3,7 @@ import { Project, Plane, Stroke, StrokeGroup } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
 export type AppMode = 'draw' | 'play';
-export type ToolType = 'brush' | 'eraser' | 'pan' | 'fill';
+export type ToolType = 'brush' | 'eraser' | 'pan' | 'fill' | 'select';
 export type EraserMode = 'stroke' | 'classic';
 
 interface AppState {
@@ -12,6 +12,7 @@ interface AppState {
   future: Project[];
   mode: AppMode;
   selectedPlaneId: string | null;
+  selectedStrokeId: string | null;
   tool: ToolType;
   color: string;
   fillColor: string;
@@ -65,11 +66,14 @@ interface AppState {
   selectPlane: (id: string | null) => void;
 
   // Strokes Management (Outliner & Editing)
+  setSelectedStrokeId: (id: string | null) => void;
   addStroke: (planeId: string, stroke: Stroke) => void;
   removeStrokes: (planeId: string, strokeIds: string[]) => void;
   deleteStroke: (planeId: string, strokeId: string) => void;
   renameStroke: (planeId: string, strokeId: string, name: string) => void;
   toggleStrokeVisibility: (planeId: string, strokeId: string) => void;
+  updateStroke: (planeId: string, strokeId: string, updates: Partial<Stroke>) => void;
+  duplicateStroke: (planeId: string, strokeId: string) => void;
   reorderStrokes: (planeId: string, startIndex: number, endIndex: number) => void;
 
   // Groups Management
@@ -126,6 +130,7 @@ export const useStore = create<AppState>((set) => ({
   future: [],
   mode: 'draw',
   selectedPlaneId: initialProject.planes[1].id,
+  selectedStrokeId: null,
   tool: 'brush',
   color: '#1C1C1C',
   fillColor: '#FAF9F6',
@@ -139,6 +144,7 @@ export const useStore = create<AppState>((set) => ({
 
   setMode: (mode) => set({ mode }),
   setTool: (tool) => set({ tool }),
+  setSelectedStrokeId: (selectedStrokeId) => set({ selectedStrokeId }),
   setColor: (color) => set({ color }),
   setFillColor: (fillColor) => set({ fillColor }),
   setBrushSize: (brushSize) => set({ brushSize }),
@@ -330,6 +336,7 @@ export const useStore = create<AppState>((set) => ({
           p.id === planeId ? { ...p, strokes: p.strokes.filter(s => s.id !== strokeId) } : p
         ),
       },
+      selectedStrokeId: state.selectedStrokeId === strokeId ? null : state.selectedStrokeId,
     })),
 
   renameStroke: (planeId, strokeId, name) =>
@@ -363,6 +370,49 @@ export const useStore = create<AppState>((set) => ({
         ),
       },
     })),
+
+  updateStroke: (planeId, strokeId, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        planes: state.project.planes.map((p) =>
+          p.id === planeId
+            ? {
+                ...p,
+                strokes: p.strokes.map((s) => (s.id === strokeId ? { ...s, ...updates } : s)),
+              }
+            : p
+        ),
+      },
+    })),
+
+  duplicateStroke: (planeId, strokeId) =>
+    set((state) => {
+      const plane = state.project.planes.find(p => p.id === planeId);
+      if (!plane) return state;
+      const stroke = plane.strokes.find(s => s.id === strokeId);
+      if (!stroke) return state;
+
+      const newId = uuidv4();
+      const duplicatedStroke: Stroke = {
+        ...stroke,
+        id: newId,
+        name: `${stroke.name || 'Tracé'} (Copie)`,
+        points: stroke.points.map(pt => ({ x: pt.x + 20, y: pt.y + 20 }))
+      };
+
+      return {
+        past: [...state.past, state.project],
+        future: [],
+        project: {
+          ...state.project,
+          planes: state.project.planes.map((p) =>
+            p.id === planeId ? { ...p, strokes: [...p.strokes, duplicatedStroke] } : p
+          ),
+        },
+        selectedStrokeId: newId
+      };
+    }),
 
   reorderStrokes: (planeId, startIndex, endIndex) =>
     set((state) => {

@@ -27,6 +27,12 @@ export class Engine {
   private lastPos: AppPoint | null = null;
   private keys: Set<string> = new Set();
   
+  // Selection and dragging state
+  private selectedStrokeId: string | null = null;
+  private isDraggingStroke = false;
+  private dragStrokeStartPoints: AppPoint[] = [];
+  private dragStrokeStartPos: AppPoint = { x: 0, y: 0 };
+  
   // Camera state
   private cameraX = 0;
   private cameraY = 0;
@@ -104,93 +110,133 @@ export class Engine {
 
   private handleStateChange(state: any) {
     if (this.isDestroyed) return;
-    // Only rebuild scene if planes array changed length or order, or properties like visibility changed.
-    // For strokes, we can optimize by only drawing the new stroke if we track it.
-    // For simplicity in MVP, we can rebuild the plane that changed.
     
-    // Update camera zoom based on state if changed
-    if (state.zoom !== this.zoom) {
-      this.zoom = state.zoom;
-    }
-    
-    // Check if project changed
-    if (this.project !== state.project) {
-      const oldProject = this.project;
-      this.project = state.project;
-      
-      if (this.project.backgroundColor !== oldProject.backgroundColor) {
-        this.app.renderer.background.color = this.project.backgroundColor;
+    try {
+      // Update camera zoom based on state if changed
+      if (state.zoom !== this.zoom) {
+        this.zoom = state.zoom;
+      }
+
+      const selectedStrokeChanged = state.selectedStrokeId !== this.selectedStrokeId;
+      const oldSelectedStrokeId = this.selectedStrokeId;
+      if (selectedStrokeChanged) {
+        this.selectedStrokeId = state.selectedStrokeId;
       }
       
-      // Sync planes
-      const currentIds = new Set(this.project.planes.map(p => p.id));
-      
-      // Remove deleted
-      for (const [id, planeData] of this.planeMap.entries()) {
-        if (!currentIds.has(id)) {
-          this.planesContainer.removeChild(planeData.container);
-          planeData.container.destroy({ children: true });
-          this.planeMap.delete(id);
+      // Check if project changed or selection changed
+      if (this.project !== state.project || selectedStrokeChanged) {
+        const oldProject = this.project;
+        this.project = state.project;
+        
+        if (this.project && oldProject && this.project.backgroundColor !== oldProject.backgroundColor) {
+          if (this.app && this.app.renderer && this.app.renderer.background) {
+            this.app.renderer.background.color = this.project.backgroundColor;
+          }
+        }
+        
+        // Sync planes
+        const currentIds = new Set(this.project.planes.map(p => p.id));
+        
+        // Remove deleted
+        for (const [id, planeData] of this.planeMap.entries()) {
+          if (!currentIds.has(id)) {
+            if (this.planesContainer && planeData && planeData.container) {
+              this.planesContainer.removeChild(planeData.container);
+              planeData.container.destroy({ children: true });
+            }
+            this.planeMap.delete(id);
+          }
+        }
+        
+        // Add or update
+        this.project.planes.forEach((plane, index) => {
+          let planeData = this.planeMap.get(plane.id);
+          if (!planeData) {
+            planeData = this.createPlane(plane);
+            this.planeMap.set(plane.id, planeData);
+            if (this.planesContainer && planeData && planeData.container) {
+              this.planesContainer.addChild(planeData.container);
+            }
+          }
+          
+          if (planeData) {
+            // Update properties
+            this.syncPlaneProperties(plane, planeData, index);
+            
+            // Check if strokes changed
+            const oldPlane = oldProject && oldProject.planes ? oldProject.planes.find(p => p.id === plane.id) : undefined;
+            
+            // We must redraw this plane if:
+            // 1. Strokes changed, visibility changed, or plane was added
+            // 2. Or if selection changed and this plane contains either the old selected stroke or the new selected stroke
+            const containsOldSelected = oldSelectedStrokeId ? plane.strokes.some(s => s.id === oldSelectedStrokeId) : false;
+            const containsNewSelected = this.selectedStrokeId ? plane.strokes.some(s => s.id === this.selectedStrokeId) : false;
+            
+            const shouldRedraw = !oldPlane || 
+                                 oldPlane.strokes !== plane.strokes || 
+                                 oldPlane.visible !== plane.visible ||
+                                 (selectedStrokeChanged && (containsOldSelected || containsNewSelected));
+                                 
+            if (shouldRedraw) {
+              this.redrawPlane(plane, planeData.context);
+            }
+          }
+        });
+        
+        // Sort by zIndex
+        if (this.planesContainer) {
+          this.planesContainer.sortChildren();
         }
       }
-      
-      // Add or update
-      this.project.planes.forEach((plane, index) => {
-        let planeData = this.planeMap.get(plane.id);
-        if (!planeData) {
-          planeData = this.createPlane(plane);
-          this.planeMap.set(plane.id, planeData);
-          this.planesContainer.addChild(planeData.container);
-        }
-        
-        // Update properties
-        this.syncPlaneProperties(plane, planeData, index);
-        
-        // Check if strokes changed (instance check for undo/redo or length check)
-        const oldPlane = oldProject.planes.find(p => p.id === plane.id);
-        if (!oldPlane || oldPlane.strokes !== plane.strokes || oldPlane.visible !== plane.visible) {
-          this.redrawPlane(plane, planeData.context);
-        }
-      });
-      
-      // Sort by zIndex
-      this.planesContainer.sortChildren();
+    } catch (error) {
+      console.warn("Error handling state change in PixiApp:", error);
     }
   }
 
   private syncPlaneProperties(plane: Plane, planeData: any, index: number) {
-    planeData.container.zIndex = this.project.planes.length - index;
-    planeData.container.alpha = plane.visible ? plane.opacity : 0;
-
-    planeData.left.blendMode = 'normal';
-    planeData.center.blendMode = 'normal';
-    planeData.right.blendMode = 'normal';
-
-    let targetBlur = plane.blur ?? 0;
-    if (this.project.dofEnabled && this.project.focalPlaneId) {
-      const focalPlane = this.project.planes.find(p => p.id === this.project.focalPlaneId);
-      if (focalPlane) {
-        const focalRange = this.project.focalRange ?? 1.0;
-        const distance = Math.abs(plane.parallaxX - focalPlane.parallaxX);
-        const dofBlur = distance * focalRange * 30;
-        targetBlur += dofBlur;
+    if (!planeData) return;
+    try {
+      if (planeData.container) {
+        planeData.container.zIndex = this.project.planes.length - index;
+        planeData.container.alpha = plane.visible ? plane.opacity : 0;
       }
-    }
 
-    planeData.blurFilter.blur = targetBlur;
+      if (planeData.left) planeData.left.blendMode = 'normal';
+      if (planeData.center) planeData.center.blendMode = 'normal';
+      if (planeData.right) planeData.right.blendMode = 'normal';
 
-    const blend = (plane.blendMode || 'normal') as any;
-    if (targetBlur > 0) {
-      // In PixiJS v8, setting a non-normal blendMode directly on a Container with active filters
-      // causes a crash ("Cannot read properties of null (reading '2')").
-      // We safely bypass this by applying the blendMode to the Filter itself.
-      planeData.container.filters = [planeData.blurFilter];
-      planeData.container.blendMode = 'normal';
-      planeData.blurFilter.blendMode = blend;
-    } else {
-      // Clear filters completely to optimize performance and apply blendMode directly on Container
-      planeData.container.filters = null;
-      planeData.container.blendMode = blend;
+      let targetBlur = plane.blur ?? 0;
+      if (this.project.dofEnabled && this.project.focalPlaneId) {
+        const focalPlane = this.project.planes.find(p => p.id === this.project.focalPlaneId);
+        if (focalPlane) {
+          const focalRange = this.project.focalRange ?? 1.0;
+          const distance = Math.abs(plane.parallaxX - focalPlane.parallaxX);
+          const dofBlur = distance * focalRange * 30;
+          targetBlur += dofBlur;
+        }
+      }
+
+      if (planeData.blurFilter) {
+        planeData.blurFilter.blur = targetBlur;
+      }
+
+      const blend = (plane.blendMode || 'normal') as any;
+      if (planeData.container && planeData.blurFilter) {
+        if (targetBlur > 0) {
+          // In PixiJS v8, setting a non-normal blendMode directly on a Container with active filters
+          // causes a crash ("Cannot read properties of null (reading '2')").
+          // We safely bypass this by applying the blendMode to the Filter itself.
+          planeData.container.filters = [planeData.blurFilter];
+          planeData.container.blendMode = 'normal';
+          planeData.blurFilter.blendMode = blend;
+        } else {
+          // Clear filters completely to optimize performance and apply blendMode directly on Container
+          planeData.container.filters = null;
+          planeData.container.blendMode = blend;
+        }
+      }
+    } catch (error) {
+      console.warn("Error syncing plane properties in PixiApp:", error);
     }
   }
 
@@ -218,25 +264,31 @@ export class Engine {
   }
 
   private redrawPlane(plane: Plane, context: GraphicsContext) {
-    context.clear();
-    
-    // Force bounds to project dimensions so blur and fills don't produce edge artifacts
-    // while keeping the texture size small enough to avoid WebGL OOM
-    context.rect(0, 0, this.project.width, this.project.height);
-    context.fill({ color: '#000000', alpha: 0 });
-    
-    if (plane.strokes) {
-      for (const stroke of plane.strokes) {
-        if (stroke.visible !== false) {
-          this.drawStrokeToContext(stroke, context);
+    if (!context) return;
+    try {
+      context.clear();
+      
+      // Force bounds to project dimensions so blur and fills don't produce edge artifacts
+      // while keeping the texture size small enough to avoid WebGL OOM
+      context.rect(0, 0, this.project.width, this.project.height);
+      context.fill({ color: '#000000', alpha: 0 });
+      
+      if (plane.strokes) {
+        for (const stroke of plane.strokes) {
+          if (stroke.visible !== false) {
+            const isSelected = stroke.id === this.selectedStrokeId;
+            this.drawStrokeToContext(stroke, context, isSelected);
+          }
         }
       }
-    }
 
-    // Draw active stroke preview if any
-    const state = useStore.getState();
-    if (this.currentStroke && state.selectedPlaneId === plane.id) {
-      this.drawStrokeToContext(this.currentStroke, context);
+      // Draw active stroke preview if any
+      const state = useStore.getState();
+      if (this.currentStroke && state.selectedPlaneId === plane.id) {
+        this.drawStrokeToContext(this.currentStroke, context, false);
+      }
+    } catch (error) {
+      console.warn("Error in redrawPlane in PixiApp:", error);
     }
   }
 
@@ -496,7 +548,7 @@ export class Engine {
     }
   }
 
-  private drawStrokeToContext(stroke: Stroke, context: GraphicsContext) {
+  private drawStrokeToContext(stroke: Stroke, context: GraphicsContext, isSelected: boolean = false) {
     if (stroke.points.length === 0) return;
     
     this.drawSmoothPath(stroke.points, context, stroke.tool === 'fill', stroke.gridSnapRoundness);
@@ -511,16 +563,81 @@ export class Engine {
     } else {
       context.stroke({ color: stroke.color, width: stroke.thickness, cap: 'round', join: 'round' });
     }
+
+    if (isSelected) {
+      // 1. Path highlight glow (semi-transparent bright blue outline)
+      context.beginPath();
+      this.drawSmoothPath(stroke.points, context, stroke.tool === 'fill', stroke.gridSnapRoundness);
+      if (stroke.tool === 'fill') {
+        context.closePath();
+      }
+      context.stroke({ color: '#3b82f6', width: Math.max(3, stroke.thickness + 5), cap: 'round', join: 'round', alpha: 0.45 });
+      context.stroke({ color: '#ffffff', width: 1.5, cap: 'round', join: 'round', alpha: 0.9 });
+
+      // 2. Bounding Box and Corner handles
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      stroke.points.forEach(pt => {
+        if (pt.x < minX) minX = pt.x;
+        if (pt.y < minY) minY = pt.y;
+        if (pt.x > maxX) maxX = pt.x;
+        if (pt.y > maxY) maxY = pt.y;
+      });
+
+      if (minX !== Infinity) {
+        const padding = 6;
+        const bMinX = minX - padding;
+        const bMinY = minY - padding;
+        const bMaxX = maxX + padding;
+        const bMaxY = maxY + padding;
+        const width = bMaxX - bMinX;
+        const height = bMaxY - bMinY;
+
+        // Bounding box rect
+        context.beginPath();
+        context.rect(bMinX, bMinY, width, height);
+        context.stroke({ color: '#3b82f6', width: 1.2, alpha: 0.8 });
+        context.fill({ color: '#3b82f6', alpha: 0.05 });
+
+        // Handles
+        const corners = [
+          { x: bMinX, y: bMinY },
+          { x: bMaxX, y: bMinY },
+          { x: bMaxX, y: bMaxY },
+          { x: bMinX, y: bMaxY },
+          { x: bMinX + width / 2, y: bMinY },
+          { x: bMaxX, y: bMinY + height / 2 },
+          { x: bMinX + width / 2, y: bMaxY },
+          { x: bMinX, y: bMinY + height / 2 }
+        ];
+
+        corners.forEach(corner => {
+          context.beginPath();
+          context.circle(corner.x, corner.y, 4.5);
+          context.fill({ color: '#ffffff' });
+          context.stroke({ color: '#3b82f6', width: 1.5 });
+        });
+      }
+    }
   }
 
   private buildScene() {
-    this.planesContainer.sortableChildren = true;
-    this.project.planes.forEach((plane, index) => {
-      const p = this.createPlane(plane);
-      this.syncPlaneProperties(plane, p, index);
-      this.planeMap.set(plane.id, p);
-      this.planesContainer.addChild(p.container);
-    });
+    try {
+      if (this.planesContainer) {
+        this.planesContainer.sortableChildren = true;
+      }
+      this.project.planes.forEach((plane, index) => {
+        const p = this.createPlane(plane);
+        if (p) {
+          this.syncPlaneProperties(plane, p, index);
+          this.planeMap.set(plane.id, p);
+          if (this.planesContainer && p.container) {
+            this.planesContainer.addChild(p.container);
+          }
+        }
+      });
+    } catch (error) {
+      console.warn("Error building scene in PixiApp:", error);
+    }
   }
 
   private setupInteraction() {
@@ -549,9 +666,28 @@ export class Engine {
       }
     });
 
-    // Keyboard panning
+    // Keyboard panning & tool shortcuts
     window.addEventListener('keydown', (e) => {
       this.keys.add(e.key.toLowerCase());
+      
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+        return;
+      }
+      
+      const state = useStore.getState();
+      if (state.mode === 'draw') {
+        const key = e.key.toLowerCase();
+        if (key === 'v') {
+          state.setTool('select');
+        } else if (key === 'b') {
+          state.setTool('brush');
+        } else if (key === 'e') {
+          state.setTool('eraser');
+        } else if (key === 'f') {
+          state.setTool('fill');
+        }
+      }
     });
     
     window.addEventListener('keyup', (e) => {
@@ -587,16 +723,106 @@ export class Engine {
       const planeId = state.selectedPlaneId;
       if (!planeId) return;
       
-      const planeData = this.planeMap.get(planeId);
-      if (!planeData) return;
-      
-      // Calculate local position relative to the active plane
       const plane = this.project.planes.find(p => p.id === planeId);
       if (!plane || !plane.visible) return;
       
-      this.isDrawing = true;
-      
       const localPos = this.getGlobalToPlane(pos.x, pos.y, plane);
+
+      if (state.tool === 'select') {
+        // 1. Try to hit-test strokes of the CURRENT plane first (from top to bottom)
+        let hitStroke: Stroke | null = null;
+        let foundPlaneId = planeId;
+        const threshold = 12; // pixels tolerance for clicking near thin lines
+        
+        const checkStrokeHit = (stroke: Stroke, x: number, y: number) => {
+          if (stroke.visible === false) return false;
+          
+          if (stroke.tool === 'fill') {
+            if (this.pointInPolygon({ x, y }, stroke.points)) {
+              return true;
+            }
+            // Check fill border
+            const contourThickness = stroke.fillStrokeThickness ?? stroke.thickness ?? 2;
+            const radius = (contourThickness / 2) + threshold;
+            const radiusSq = radius * radius;
+            for (let i = 0; i < stroke.points.length - 1; i++) {
+              if (this.distToSegmentSquared({ x, y }, stroke.points[i], stroke.points[i+1]) <= radiusSq) {
+                return true;
+              }
+            }
+          } else {
+            const radius = (stroke.thickness / 2) + threshold;
+            const radiusSq = radius * radius;
+            if (stroke.points.length === 1) {
+              const distSq = (stroke.points[0].x - x) ** 2 + (stroke.points[0].y - y) ** 2;
+              if (distSq <= radiusSq) return true;
+            } else {
+              for (let i = 0; i < stroke.points.length - 1; i++) {
+                if (this.distToSegmentSquared({ x, y }, stroke.points[i], stroke.points[i+1]) <= radiusSq) {
+                  return true;
+                }
+              }
+            }
+          }
+          return false;
+        };
+        
+        // Check active plane strokes (most recently drawn first)
+        const activeStrokesReversed = [...plane.strokes].reverse();
+        for (const stroke of activeStrokesReversed) {
+          if (checkStrokeHit(stroke, localPos.x, localPos.y)) {
+            hitStroke = stroke;
+            break;
+          }
+        }
+        
+        // 2. If nothing hit on active plane, check other visible planes!
+        if (!hitStroke) {
+          for (const otherPlane of this.project.planes) {
+            if (otherPlane.id === planeId || !otherPlane.visible) continue;
+            
+            const otherLocalPos = this.getGlobalToPlane(pos.x, pos.y, otherPlane);
+            const otherStrokesReversed = [...otherPlane.strokes].reverse();
+            
+            for (const stroke of otherStrokesReversed) {
+              if (checkStrokeHit(stroke, otherLocalPos.x, otherLocalPos.y)) {
+                hitStroke = stroke;
+                foundPlaneId = otherPlane.id;
+                break;
+              }
+            }
+            if (hitStroke) break;
+          }
+        }
+        
+        if (hitStroke) {
+          // Select plane and stroke
+          state.selectPlane(foundPlaneId);
+          state.setSelectedStrokeId(hitStroke.id);
+          
+          // Start dragging!
+          this.isDraggingStroke = true;
+          
+          // We need the local position relative to the found plane
+          const foundPlane = this.project.planes.find(p => p.id === foundPlaneId)!;
+          const foundLocalPos = this.getGlobalToPlane(pos.x, pos.y, foundPlane);
+          
+          this.dragStrokeStartPoints = hitStroke.points.map(pt => ({ ...pt }));
+          this.dragStrokeStartPos = { x: foundLocalPos.x, y: foundLocalPos.y };
+          
+          // Save undo state before dragging
+          state.commit();
+        } else {
+          // Clear selection if clicked on empty space
+          state.setSelectedStrokeId(null);
+        }
+        return;
+      }
+
+      const planeData = this.planeMap.get(planeId);
+      if (!planeData) return;
+      
+      this.isDrawing = true;
 
       if (state.tool === 'eraser') {
         state.commit();
@@ -810,6 +1036,23 @@ export class Engine {
       }
       return;
     }
+
+    if (this.isDraggingStroke && state.selectedStrokeId && state.selectedPlaneId) {
+      const plane = this.project.planes.find(p => p.id === state.selectedPlaneId);
+      if (plane) {
+        const localPos = this.getGlobalToPlane(pos.x, pos.y, plane);
+        const dx = localPos.x - this.dragStrokeStartPos.x;
+        const dy = localPos.y - this.dragStrokeStartPos.y;
+        
+        const translatedPoints = this.dragStrokeStartPoints.map(pt => ({
+          x: pt.x + dx,
+          y: pt.y + dy
+        }));
+        
+        state.updateStroke(plane.id, state.selectedStrokeId, { points: translatedPoints });
+      }
+      return;
+    }
     
     if (this.isDrawing) {
       const planeId = state.selectedPlaneId;
@@ -865,6 +1108,11 @@ export class Engine {
 
     if (this.isDragging) {
       this.isDragging = false;
+      return;
+    }
+
+    if (this.isDraggingStroke) {
+      this.isDraggingStroke = false;
       return;
     }
     
@@ -968,7 +1216,13 @@ export class Engine {
     this.rootContainer.scale.set(this.zoom);
     
     // Draw grid
-    this.gridGraphics.clear();
+    if (this.gridGraphics && this.gridGraphics.context) {
+      try {
+        this.gridGraphics.clear();
+      } catch (e) {
+        console.warn("Error clearing gridGraphics context:", e);
+      }
+    }
     const proj = state.project;
     if (proj.gridEnabled && proj.gridSize > 0) {
       const size = proj.gridSize;
